@@ -95,4 +95,48 @@ app.get('/get-canais', async (req, res) => {
   }
 });
 
+// =========================================================
+// PROXY DE VÍDEO PROFISSIONAL 💥
+// =========================================================
+app.get('/stream', async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).send("URL do vídeo ausente");
+
+  // Cabeçalhos que vamos enviar para o dono da lista IPTV
+  const fetchHeaders = {
+    "User-Agent": "VLC/3.0.16 LibVLC/3.0.16", // Truque clássico: fingir que é o VLC de PC
+    "Accept": "*/*"
+  };
+
+  // Se o player do celular (expo-av) tentar avançar o filme, repassamos esse pedido!
+  if (req.headers.range) {
+    fetchHeaders['Range'] = req.headers.range;
+  }
+
+  try {
+    // O Railway pede o vídeo pro servidor original
+    const response = await fetch(url, { headers: fetchHeaders });
+
+    // Se der erro lá no provedor, a gente avisa
+    if (!response.ok && response.status !== 206) {
+      return res.status(response.status).send("Erro no provedor original");
+    }
+
+    // Copia os cabeçalhos do vídeo (tamanho, formato) e manda pro celular
+    response.headers.forEach((value, name) => {
+      res.setHeader(name, value);
+    });
+    
+    // Repassa o status (200 para vídeo inteiro, 206 para vídeo cortado/avançado)
+    res.status(response.status);
+
+    // MÁGICA: Pipa o vídeo direto para o celular sem salvar nada na memória do Railway!
+    response.body.pipe(res);
+
+  } catch (error) {
+    console.error("Erro no proxy de vídeo:", error.message);
+    res.status(500).send("Erro ao processar o stream");
+  }
+});
+
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
