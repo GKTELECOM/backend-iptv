@@ -1,91 +1,98 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const cors = require('cors');
-const parser = require('iptv-playlist-parser'); 
+const readline = require('readline'); // Ferramenta nativa do Node para ler linha por linha sem gastar memória
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
-app.get('/', (req, res) => {
-  res.send("Servidor VYPER ONLINE 🚀");
-});
+app.get('/', (req, res) => res.send("Servidor VYPER ONLINE 🚀"));
 
 app.post('/register-list', (req, res) => {
   const { playlistUrl } = req.body;
-  console.log("===============================");
-  console.log("NOVA LISTA CADASTRADA:", playlistUrl);
-  console.log("===============================");
-  res.status(200).json({ success: true, message: "Lista recebida pelo servidor Railway!" });
+  console.log("NOVA LISTA REGISTRADA:", playlistUrl);
+  res.status(200).json({ success: true, message: "Lista registrada!" });
 });
 
 // =========================================================
-// ROTA SUPER OTIMIZADA: PROCESSA E SEPARA AS CATEGORIAS
+// ROTA ULTRA LEVE: LÊ LISTAS GIGANTES SEM ESTOURAR A MEMÓRIA
 // =========================================================
 app.get('/get-canais', async (req, res) => {
   const { url } = req.query;
   if (!url) return res.status(400).json({ error: "Falta a URL da lista" });
 
   try {
-    console.log(`A transferir lista de: ${url}`);
+    console.log(`Baixando lista gigante via STREAM: ${url}`);
     
-    // 1. Descarrega a lista M3U
     const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-    const m3uString = await response.text();
-    
-    console.log("A processar e organizar categorias...");
-    const playlist = parser.parse(m3uString);
-    
-    // 2. Cria as "gavetas" vazias
+    if (!response.ok) throw new Error("Erro ao baixar a lista do provedor");
+
     const canais = [];
     const filmes = [];
     const series = [];
-
-    // 3. Lê cada item e guarda na gaveta certa
-    playlist.items.forEach(item => {
-      // Pega o nome do grupo e converte para minúsculas para facilitar a pesquisa
-      const groupTitle = (item.group.title || "").toLowerCase();
-      
-      // Palavras-chave para SÉRIES
-      if (groupTitle.includes('serie') || groupTitle.includes('série') || groupTitle.includes('season')) {
-        series.push(item);
-      } 
-      // Palavras-chave para FILMES
-      else if (groupTitle.includes('filme') || groupTitle.includes('vod') || groupTitle.includes('cinema') || groupTitle.includes('lançamento')) {
-        filmes.push(item);
-      } 
-      // Se não for filme nem série, vai para os CANAIS de TV
-      else {
-        canais.push(item);
-      }
-    });
     
-    console.log(`Organização concluída: ${canais.length} Canais | ${filmes.length} Filmes | ${series.length} Séries`);
+    let currentItem = {};
 
-    // 4. Envia tudo separadinho para o teu App
+    // Aqui está a mágica: Ele lê a lista enquanto ela ainda está sendo baixada!
+    const rl = readline.createInterface({
+      input: response.body, // Puxa o fluxo direto da internet
+      crlfDelay: Infinity
+    });
+
+    for await (const line of rl) {
+      const trimmedLine = line.trim();
+
+      if (trimmedLine.startsWith('#EXTINF:')) {
+        // Pega o Grupo
+        const groupMatch = trimmedLine.match(/group-title="([^"]+)"/i) || trimmedLine.match(/group-title='([^']+)'/i);
+        const category = groupMatch ? groupMatch[1] : 'Sem Categoria';
+
+        // Pega a Logo
+        const logoMatch = trimmedLine.match(/tvg-logo="([^"]+)"/i) || trimmedLine.match(/tvg-logo='([^']+)'/i);
+        const poster = logoMatch ? logoMatch[1] : null;
+
+        // Pega o Nome
+        const nameSplit = trimmedLine.split(',');
+        const name = nameSplit.length > 1 ? nameSplit[nameSplit.length - 1].trim() : 'Desconhecido';
+
+        currentItem = { 
+          name, 
+          tvg: { logo: poster }, 
+          group: { title: category } 
+        };
+      } 
+      else if (trimmedLine.startsWith('http') && currentItem.name) {
+        currentItem.url = trimmedLine;
+        
+        // Separação em tempo real
+        const groupTitle = (currentItem.group.title || "").toLowerCase();
+        
+        if (groupTitle.includes('serie') || groupTitle.includes('série') || groupTitle.includes('season')) {
+          series.push(currentItem);
+        } else if (groupTitle.includes('filme') || groupTitle.includes('vod') || groupTitle.includes('cinema') || groupTitle.includes('lançamento')) {
+          filmes.push(currentItem);
+        } else {
+          canais.push(currentItem);
+        }
+        
+        currentItem = {}; // Limpa a variável para o próximo link
+      }
+    }
+
+    console.log(`Processamento concluído! Canais: ${canais.length} | Filmes: ${filmes.length} | Séries: ${series.length}`);
+
     res.status(200).json({
       success: true,
-      totais: {
-        canais: canais.length,
-        filmes: filmes.length,
-        series: series.length
-      },
-      dados: {
-        canais: canais,
-        filmes: filmes,
-        series: series
-      }
+      dados: { canais, filmes, series }
     });
 
   } catch (e) {
-    console.error("Erro ao processar lista no servidor:", e);
-    res.status(500).json({ error: "Erro ao processar a lista." });
+    console.error("Erro ao processar lista gigante:", e);
+    res.status(500).json({ error: "Erro ao processar lista. Servidor sobrecarregado." });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor a correr na porta ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
