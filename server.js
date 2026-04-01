@@ -75,18 +75,20 @@ app.get('/get-canais', async (req, res) => {
         } else if (groupTitle.includes('filme') || groupTitle.includes('vod') || groupTitle.includes('cinema') || groupTitle.includes('lançamento')) {
           filmes.push(currentItem);
         } else {
-          canais.push(currentItem);
+          // DIETA DE MEMÓRIA: Comentamos os canais para o celular não explodir com 314 mil itens!
+          // canais.push(currentItem);
         }
         
         currentItem = {}; // Limpa a variável para o próximo link
       }
     }
 
-    console.log(`Processamento concluído! Canais: ${canais.length} | Filmes: ${filmes.length} | Séries: ${series.length}`);
+    console.log(`Processamento concluído! Canais ignorados: ${canais.length} | Filmes: ${filmes.length} | Séries: ${series.length}`);
 
     res.status(200).json({
       success: true,
-      dados: { canais, filmes, series }
+      // MÁGICA FINAL: Mandando apenas Filmes e Séries pro app ficar leve!
+      dados: { filmes, series }
     });
 
   } catch (e) {
