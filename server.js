@@ -1,7 +1,6 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const cors = require('cors');
-const readline = require('readline'); // Ferramenta nativa do Node para ler linha por linha sem gastar memória
 
 const app = express();
 app.use(cors());
@@ -9,130 +8,79 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 
-app.get('/', (req, res) => res.send("Servidor VYPER ONLINE 🚀"));
+// Um "banco de dados" temporário na memória para guardar onde o usuário parou no filme.
+// Numa versão profissional, você usaria MongoDB ou Firebase aqui.
+const progressoUsuarios = {}; 
 
-app.post('/register-list', (req, res) => {
-  const { playlistUrl } = req.body;
-  console.log("NOVA LISTA REGISTRADA:", playlistUrl);
-  res.status(200).json({ success: true, message: "Lista registrada!" });
+app.get('/', (req, res) => res.send("Backend VYPER Universal ONLINE 🚀"));
+
+// =========================================================
+// ROTAS DO APLICATIVO (SALVAR PROGRESSO DE VÍDEOS)
+// =========================================================
+
+// Rota para o celular avisar em que minuto o filme está
+app.post('/salvar-progresso', (req, res) => {
+  // O app vai enviar: quem é o usuário, qual o ID do filme e o tempo atual
+  const { usuarioId, filmeId, tempoAtual } = req.body;
+  
+  if (!usuarioId || !filmeId) {
+    return res.status(400).json({ error: "Dados incompletos" });
+  }
+
+  // Cria o espaço do usuário se não existir
+  if (!progressoUsuarios[usuarioId]) {
+    progressoUsuarios[usuarioId] = {};
+  }
+
+  // Salva o tempo do filme específico
+  progressoUsuarios[usuarioId][filmeId] = tempoAtual;
+  
+  console.log(`Progresso salvo: Usuário ${usuarioId} | Filme ${filmeId} | Minuto: ${tempoAtual}`);
+  res.status(200).json({ success: true });
 });
 
-// =========================================================
-// ROTA ULTRA LEVE: LÊ LISTAS GIGANTES SEM ESTOURAR A MEMÓRIA
-// =========================================================
-app.get('/get-canais', async (req, res) => {
-  const { url } = req.query;
-  if (!url) return res.status(400).json({ error: "Falta a URL da lista" });
+// Rota para o celular perguntar de onde deve continuar o filme
+app.get('/buscar-progresso', (req, res) => {
+  const { usuarioId, filmeId } = req.query;
 
-  try {
-    console.log(`Baixando lista gigante via STREAM: ${url}`);
-    
-    const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-    if (!response.ok) throw new Error("Erro ao baixar a lista do provedor");
-
-    const canais = [];
-    const filmes = [];
-    const series = [];
-    
-    let currentItem = {};
-
-    // Aqui está a mágica: Ele lê a lista enquanto ela ainda está sendo baixada!
-    const rl = readline.createInterface({
-      input: response.body, // Puxa o fluxo direto da internet
-      crlfDelay: Infinity
-    });
-
-    for await (const line of rl) {
-      const trimmedLine = line.trim();
-
-      if (trimmedLine.startsWith('#EXTINF:')) {
-        // Pega o Grupo
-        const groupMatch = trimmedLine.match(/group-title="([^"]+)"/i) || trimmedLine.match(/group-title='([^']+)'/i);
-        const category = groupMatch ? groupMatch[1] : 'Sem Categoria';
-
-        // Pega a Logo
-        const logoMatch = trimmedLine.match(/tvg-logo="([^"]+)"/i) || trimmedLine.match(/tvg-logo='([^']+)'/i);
-        const poster = logoMatch ? logoMatch[1] : null;
-
-        // Pega o Nome
-        const nameSplit = trimmedLine.split(',');
-        const name = nameSplit.length > 1 ? nameSplit[nameSplit.length - 1].trim() : 'Desconhecido';
-
-        currentItem = { 
-          name, 
-          tvg: { logo: poster }, 
-          group: { title: category } 
-        };
-      } 
-      else if (trimmedLine.startsWith('http') && currentItem.name) {
-        currentItem.url = trimmedLine;
-        
-        // Separação em tempo real
-        const groupTitle = (currentItem.group.title || "").toLowerCase();
-        
-        if (groupTitle.includes('serie') || groupTitle.includes('série') || groupTitle.includes('season')) {
-          series.push(currentItem);
-        } else if (groupTitle.includes('filme') || groupTitle.includes('vod') || groupTitle.includes('cinema') || groupTitle.includes('lançamento')) {
-          filmes.push(currentItem);
-        } else {
-          // DIETA DE MEMÓRIA: Comentamos os canais para o celular não explodir com 314 mil itens!
-          // canais.push(currentItem);
-        }
-        
-        currentItem = {}; // Limpa a variável para o próximo link
-      }
-    }
-
-    console.log(`Processamento concluído! Canais ignorados: ${canais.length} | Filmes: ${filmes.length} | Séries: ${series.length}`);
-
-    res.status(200).json({
-      success: true,
-      // MÁGICA FINAL: Mandando apenas Filmes e Séries pro app ficar leve!
-      dados: { filmes, series }
-    });
-
-  } catch (e) {
-    console.error("Erro ao processar lista gigante:", e);
-    res.status(500).json({ error: "Erro ao processar lista. Servidor sobrecarregado." });
+  if (progressoUsuarios[usuarioId] && progressoUsuarios[usuarioId][filmeId]) {
+    const tempoSalvo = progressoUsuarios[usuarioId][filmeId];
+    res.status(200).json({ tempoSalvo });
+  } else {
+    // Se não tem progresso salvo, começa do zero
+    res.status(200).json({ tempoSalvo: 0 });
   }
 });
 
+
 // =========================================================
-// PROXY DE VÍDEO PROFISSIONAL 💥
+// PROXY DE VÍDEO PROFISSIONAL 💥 (MANTIDO)
 // =========================================================
 app.get('/stream', async (req, res) => {
   const { url } = req.query;
   if (!url) return res.status(400).send("URL do vídeo ausente");
 
-  // Cabeçalhos que vamos enviar para o dono da lista IPTV
   const fetchHeaders = {
-    "User-Agent": "VLC/3.0.16 LibVLC/3.0.16", // Truque clássico: fingir que é o VLC de PC
+    "User-Agent": "VLC/3.0.16 LibVLC/3.0.16",
     "Accept": "*/*"
   };
 
-  // Se o player do celular (expo-av) tentar avançar o filme, repassamos esse pedido!
   if (req.headers.range) {
     fetchHeaders['Range'] = req.headers.range;
   }
 
   try {
-    // O Railway pede o vídeo pro servidor original
     const response = await fetch(url, { headers: fetchHeaders });
 
-    // Se der erro lá no provedor, a gente avisa
     if (!response.ok && response.status !== 206) {
       return res.status(response.status).send("Erro no provedor original");
     }
 
-    // Copia os cabeçalhos do vídeo (tamanho, formato) e manda pro celular
     response.headers.forEach((value, name) => {
       res.setHeader(name, value);
     });
     
-    // Repassa o status (200 para vídeo inteiro, 206 para vídeo cortado/avançado)
     res.status(response.status);
-
-    // MÁGICA: Pipa o vídeo direto para o celular sem salvar nada na memória do Railway!
     response.body.pipe(res);
 
   } catch (error) {
