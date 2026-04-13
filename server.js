@@ -8,6 +8,8 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
+// DEFINA O SEU IP AQUI PARA O FILTRO MÁGICO
+const MEU_IP = '192.168.1.3';
 
 app.get('/', (req, res) => res.send("Servidor VYPER ONLINE 🚀"));
 
@@ -36,9 +38,8 @@ app.get('/get-canais', async (req, res) => {
     
     let currentItem = {};
 
-    // Aqui está a mágica: Ele lê a lista enquanto ela ainda está sendo baixada!
     const rl = readline.createInterface({
-      input: response.body, // Puxa o fluxo direto da internet
+      input: response.body,
       crlfDelay: Infinity
     });
 
@@ -46,15 +47,12 @@ app.get('/get-canais', async (req, res) => {
       const trimmedLine = line.trim();
 
       if (trimmedLine.startsWith('#EXTINF:')) {
-        // Pega o Grupo
         const groupMatch = trimmedLine.match(/group-title="([^"]+)"/i) || trimmedLine.match(/group-title='([^']+)'/i);
         const category = groupMatch ? groupMatch[1] : 'Sem Categoria';
 
-        // Pega a Logo
         const logoMatch = trimmedLine.match(/tvg-logo="([^"]+)"/i) || trimmedLine.match(/tvg-logo='([^']+)'/i);
         const poster = logoMatch ? logoMatch[1] : null;
 
-        // Pega o Nome
         const nameSplit = trimmedLine.split(',');
         const name = nameSplit.length > 1 ? nameSplit[nameSplit.length - 1].trim() : 'Desconhecido';
 
@@ -65,9 +63,16 @@ app.get('/get-canais', async (req, res) => {
         };
       } 
       else if (trimmedLine.startsWith('http') && currentItem.name) {
-        currentItem.url = trimmedLine;
         
-        // Separação em tempo real
+        // ✅ AQUI ESTÁ A CORREÇÃO DO LOCALHOST!
+        // Se a lista vier com "localhost", trocamos imediatamente pelo IP do seu PC
+        let urlCorrigida = trimmedLine;
+        if (urlCorrigida.includes('localhost') || urlCorrigida.includes('127.0.0.1')) {
+            urlCorrigida = urlCorrigida.replace(/localhost|127\.0\.0\.1/g, MEU_IP);
+        }
+        
+        currentItem.url = urlCorrigida;
+        
         const groupTitle = (currentItem.group.title || "").toLowerCase();
         
         if (groupTitle.includes('serie') || groupTitle.includes('série') || groupTitle.includes('season')) {
@@ -75,11 +80,10 @@ app.get('/get-canais', async (req, res) => {
         } else if (groupTitle.includes('filme') || groupTitle.includes('vod') || groupTitle.includes('cinema') || groupTitle.includes('lançamento')) {
           filmes.push(currentItem);
         } else {
-          // DIETA DE MEMÓRIA: Comentamos os canais para o celular não explodir com 314 mil itens!
           // canais.push(currentItem);
         }
         
-        currentItem = {}; // Limpa a variável para o próximo link
+        currentItem = {};
       }
     }
 
@@ -87,7 +91,6 @@ app.get('/get-canais', async (req, res) => {
 
     res.status(200).json({
       success: true,
-      // MÁGICA FINAL: Mandando apenas Filmes e Séries pro app ficar leve!
       dados: { filmes, series }
     });
 
@@ -104,35 +107,27 @@ app.get('/stream', async (req, res) => {
   const { url } = req.query;
   if (!url) return res.status(400).send("URL do vídeo ausente");
 
-  // Cabeçalhos que vamos enviar para o dono da lista IPTV
   const fetchHeaders = {
-    "User-Agent": "VLC/3.0.16 LibVLC/3.0.16", // Truque clássico: fingir que é o VLC de PC
+    "User-Agent": "VLC/3.0.16 LibVLC/3.0.16",
     "Accept": "*/*"
   };
 
-  // Se o player do celular (expo-av) tentar avançar o filme, repassamos esse pedido!
   if (req.headers.range) {
     fetchHeaders['Range'] = req.headers.range;
   }
 
   try {
-    // O Railway pede o vídeo pro servidor original
     const response = await fetch(url, { headers: fetchHeaders });
 
-    // Se der erro lá no provedor, a gente avisa
     if (!response.ok && response.status !== 206) {
       return res.status(response.status).send("Erro no provedor original");
     }
 
-    // Copia os cabeçalhos do vídeo (tamanho, formato) e manda pro celular
     response.headers.forEach((value, name) => {
       res.setHeader(name, value);
     });
     
-    // Repassa o status (200 para vídeo inteiro, 206 para vídeo cortado/avançado)
     res.status(response.status);
-
-    // MÁGICA: Pipa o vídeo direto para o celular sem salvar nada na memória do Railway!
     response.body.pipe(res);
 
   } catch (error) {
@@ -141,4 +136,8 @@ app.get('/stream', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+// ✅ AQUI ESTÁ A SEGUNDA CORREÇÃO: O '0.0.0.0' liberta o servidor para a rede!
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log(`🌐 Acessível na rede local em: http://${MEU_IP}:${PORT}`);
+});
